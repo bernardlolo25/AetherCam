@@ -30,7 +30,7 @@ fun QrScannerDialog(
     onOpenScanner: () -> Unit = {},
     onScannerClosed: () -> Unit = {}
 ) {
-    var manualIp by remember { mutableStateOf("192.168.1.108") }
+    var manualIp by remember { mutableStateOf("") }
     var manualPin by remember { mutableStateOf("849201") }
     var isManualMode by remember { mutableStateOf(false) }
 
@@ -144,16 +144,17 @@ fun QrScannerDialog(
                         Text("Open Camera QR Scanner", fontWeight = FontWeight.Bold)
                     }
 
-                    // Button 2: Quick instant connect (USB/LAN loopback or local subnet)
+                    // Button 2: USB ADB instant connect (requires adb reverse on PC)
                     OutlinedButton(
                         onClick = {
-                            val sampleQr = """{"v":2,"ip":"127.0.0.1","udpPort":48200,"tcpPort":48201,"pin":"849201","serverPubKey":"BM7v9LqP3rM1z0NvQ8sYt4XuKgH2jR5wFpE6aN8="}"""
-                            onQrScanned(sampleQr)
+                            // Only works with USB + "adb reverse tcp:48200 tcp:48200 && adb reverse tcp:48201 tcp:48201"
+                            val usbQr = """{"v":2,"ip":"127.0.0.1","udpPort":48200,"tcpPort":48201,"pin":"849201","serverPubKey":"BM7v9LqP3rM1z0NvQ8sYt4XuKgH2jR5wFpE6aN8="}"""
+                            onQrScanned(usbQr)
                         },
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Instant Connect (USB / Localhost)", color = Color(0xFF818CF8), fontWeight = FontWeight.SemiBold)
+                        Text("⚡ USB Instant Connect (requires ADB)", color = Color(0xFF818CF8), fontWeight = FontWeight.SemiBold)
                     }
 
                     TextButton(onClick = { isManualMode = true }) {

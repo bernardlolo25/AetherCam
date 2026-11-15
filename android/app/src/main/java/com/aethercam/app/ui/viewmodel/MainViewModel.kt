@@ -48,6 +48,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _batteryPct = MutableStateFlow(94)
     val batteryPct: StateFlow<Int> = _batteryPct.asStateFlow()
 
+    // User-visible connection status messages (null = no active message)
+    private val _connectionStatus = MutableStateFlow<String?>(null)
+    val connectionStatus: StateFlow<String?> = _connectionStatus.asStateFlow()
+
     private val networkTransport = NetworkTransport(
         context = application,
         onCameraParamsReceived = { updates ->
@@ -134,7 +138,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun handleQrScanned(rawJson: String) {
-        val info = securityManager.parseQrCodePayload(rawJson) ?: return
+        val info = securityManager.parseQrCodePayload(rawJson) ?: run {
+            _connectionStatus.value = "❌ Invalid QR code — cannot parse pairing data"
+            return
+        }
+        _connectionStatus.value = "🔗 Connecting to ${info.hostIp}…"
         viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
             try {
                 networkTransport.connectManual(
@@ -144,9 +152,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     transportType = ActiveTransportType.WIFI_LAN,
                     scope = viewModelScope
                 )
-                _activeTransport.value = ActiveTransportType.WIFI_LAN
+                if (networkTransport.activeTransport != ActiveTransportType.NONE) {
+                    _activeTransport.value = networkTransport.activeTransport
+                    _connectionStatus.value = "✅ Connected to ${info.hostIp}!"
+                } else {
+                    _connectionStatus.value = "❌ Connection failed — is AetherCam running on the PC? Same Wi-Fi?"
+                }
                 Log.i("MainViewModel", "Pairing established to ${info.hostIp}")
             } catch (e: Exception) {
+                _connectionStatus.value = "❌ Error: ${e.message}"
                 Log.e("MainViewModel", "Pairing connection error: ${e.message}", e)
             }
         }
@@ -154,7 +168,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun handleManualPairing(ip: String, pin: String) {
         val targetIp = ip.trim()
-        if (targetIp.isEmpty()) return
+        if (targetIp.isEmpty()) {
+            _connectionStatus.value = "❌ Please enter the desktop IP address"
+            return
+        }
+        _connectionStatus.value = "🔗 Connecting to $targetIp…"
         viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
             try {
                 networkTransport.connectManual(
@@ -164,12 +182,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     transportType = ActiveTransportType.WIFI_LAN,
                     scope = viewModelScope
                 )
-                _activeTransport.value = ActiveTransportType.WIFI_LAN
+                if (networkTransport.activeTransport != ActiveTransportType.NONE) {
+                    _activeTransport.value = networkTransport.activeTransport
+                    _connectionStatus.value = "✅ Connected to $targetIp!"
+                } else {
+                    _connectionStatus.value = "❌ Cannot reach $targetIp:48201 — ensure AetherCam desktop is running and both devices are on the same Wi-Fi"
+                }
                 Log.i("MainViewModel", "Manual pairing connected to $targetIp")
             } catch (e: Exception) {
+                _connectionStatus.value = "❌ Error: ${e.message}"
                 Log.e("MainViewModel", "Manual pairing error: ${e.message}", e)
             }
         }
+    }
+
+    /** Call after the UI has shown the connection status message */
+    fun clearConnectionStatus() {
+        _connectionStatus.value = null
     }
 
     fun pauseCameraForQrScan() {

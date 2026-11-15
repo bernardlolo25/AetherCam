@@ -36,11 +36,17 @@ export const DevicePairingModal: React.FC<DevicePairingModalProps> = ({
   const [activeTab, setActiveTab] = useState<'qr' | 'usb' | 'pin'>('qr');
 
   useEffect(() => {
-    if (isOpen) {
-      invokeTauri<PairingQrData>('get_pairing_qr_data')
-        .then(setQrData)
-        .catch(console.error);
-    }
+    if (!isOpen) return;
+    // Try to fetch real QR data from the running desktop server first
+    fetch('http://127.0.0.1:48202/api/qr-data')
+      .then(r => { if (!r.ok) throw new Error('not ok'); return r.json(); })
+      .then((data: PairingQrData) => setQrData(data))
+      .catch(() => {
+        // Fallback to Tauri IPC (or mock) if server not reachable
+        invokeTauri<PairingQrData>('get_pairing_qr_data')
+          .then(setQrData)
+          .catch(console.error);
+      });
   }, [isOpen]);
 
   if (!isOpen) return null;

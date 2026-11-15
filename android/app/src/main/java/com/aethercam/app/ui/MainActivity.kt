@@ -13,6 +13,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -23,6 +28,7 @@ import com.aethercam.app.ui.components.QrScannerDialog
 import com.aethercam.app.ui.components.StatsOverlay
 import com.aethercam.app.ui.theme.AetherCamTheme
 import com.aethercam.app.ui.viewmodel.MainViewModel
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -125,82 +131,112 @@ fun MainScreen(
     val fps by viewModel.fps.collectAsState()
     val bitrateMbps by viewModel.bitrateMbps.collectAsState()
     val batteryPct by viewModel.batteryPct.collectAsState()
+    val connectionStatus by viewModel.connectionStatus.collectAsState()
 
     var showPairingDialog by remember { mutableStateOf(false) }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFF090D16))
-    ) {
-        // Camera Preview SurfaceView
-        AndroidView(
-            factory = { context ->
-                SurfaceView(context).apply {
-                    holder.addCallback(object : SurfaceHolder.Callback {
-                        override fun surfaceCreated(holder: SurfaceHolder) {
-                            onSurfaceAvailable(holder.surface)
-                        }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
-                        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
+    // Show snackbar whenever connectionStatus changes (non-null)
+    LaunchedEffect(connectionStatus) {
+        val msg = connectionStatus ?: return@LaunchedEffect
+        scope.launch {
+            snackbarHostState.showSnackbar(
+                message = msg,
+                duration = SnackbarDuration.Short
+            )
+            viewModel.clearConnectionStatus()
+        }
+    }
 
-                        override fun surfaceDestroyed(holder: SurfaceHolder) {
-                            onSurfaceDestroyed()
-                        }
-                    })
-                }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
-
-        // Top Status Overlay
-        StatsOverlay(
-            isStreaming = isStreaming,
-            transport = activeTransport,
-            resolution = cameraConfig.resolution.label,
-            fps = fps,
-            bitrateMbps = bitrateMbps,
-            batteryPct = batteryPct,
-            modifier = Modifier.statusBarsPadding()
-        )
-
-        // Bottom Controls Bar
+    Scaffold(
+        containerColor = Color.Transparent,
+        snackbarHost = {
+            SnackbarHost(hostState = snackbarHostState) { data ->
+                Snackbar(
+                    snackbarData = data,
+                    containerColor = Color(0xFF1E293B),
+                    contentColor = Color.White
+                )
+            }
+        }
+    ) { innerPadding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .navigationBarsPadding(),
-            contentAlignment = androidx.compose.ui.Alignment.BottomCenter
+                .background(Color(0xFF090D16))
+                .padding(innerPadding)
         ) {
-            CameraControlsBar(
-                currentLens = cameraConfig.lens,
-                zoomRatio = cameraConfig.zoomRatio,
-                isTorchOn = cameraConfig.torchEnabled,
-                isMuted = isMuted,
-                onLensChanged = { viewModel.setLens(it) },
-                onZoomChanged = { viewModel.setZoom(it) },
-                onTorchToggled = { viewModel.toggleTorch() },
-                onMuteToggled = { viewModel.toggleMute() },
-                onPairingClicked = { showPairingDialog = true }
-            )
-        }
+            // Camera Preview SurfaceView
+            AndroidView(
+                factory = { context ->
+                    SurfaceView(context).apply {
+                        holder.addCallback(object : SurfaceHolder.Callback {
+                            override fun surfaceCreated(holder: SurfaceHolder) {
+                                onSurfaceAvailable(holder.surface)
+                            }
 
-        // QR Scanner / Manual Pairing Dialog
-        if (showPairingDialog) {
-            QrScannerDialog(
-                onDismiss = {
-                    showPairingDialog = false
+                            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
+
+                            override fun surfaceDestroyed(holder: SurfaceHolder) {
+                                onSurfaceDestroyed()
+                            }
+                        })
+                    }
                 },
-                onQrScanned = { rawJson ->
-                    viewModel.handleQrScanned(rawJson)
-                    showPairingDialog = false
-                },
-                onManualPinSubmit = { ip, pin ->
-                    viewModel.handleManualPairing(ip, pin)
-                    showPairingDialog = false
-                },
-                onOpenScanner = onOpenScanner,
-                onScannerClosed = onScannerClosed
+                modifier = Modifier.fillMaxSize()
             )
+
+            // Top Status Overlay
+            StatsOverlay(
+                isStreaming = isStreaming,
+                transport = activeTransport,
+                resolution = cameraConfig.resolution.label,
+                fps = fps,
+                bitrateMbps = bitrateMbps,
+                batteryPct = batteryPct,
+                modifier = Modifier.statusBarsPadding()
+            )
+
+            // Bottom Controls Bar
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .navigationBarsPadding(),
+                contentAlignment = androidx.compose.ui.Alignment.BottomCenter
+            ) {
+                CameraControlsBar(
+                    currentLens = cameraConfig.lens,
+                    zoomRatio = cameraConfig.zoomRatio,
+                    isTorchOn = cameraConfig.torchEnabled,
+                    isMuted = isMuted,
+                    onLensChanged = { viewModel.setLens(it) },
+                    onZoomChanged = { viewModel.setZoom(it) },
+                    onTorchToggled = { viewModel.toggleTorch() },
+                    onMuteToggled = { viewModel.toggleMute() },
+                    onPairingClicked = { showPairingDialog = true }
+                )
+            }
+
+            // QR Scanner / Manual Pairing Dialog
+            if (showPairingDialog) {
+                QrScannerDialog(
+                    onDismiss = {
+                        showPairingDialog = false
+                    },
+                    onQrScanned = { rawJson ->
+                        viewModel.handleQrScanned(rawJson)
+                        showPairingDialog = false
+                    },
+                    onManualPinSubmit = { ip, pin ->
+                        viewModel.handleManualPairing(ip, pin)
+                        showPairingDialog = false
+                    },
+                    onOpenScanner = onOpenScanner,
+                    onScannerClosed = onScannerClosed
+                )
+            }
         }
     }
 }

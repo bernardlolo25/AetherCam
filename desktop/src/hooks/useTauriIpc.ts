@@ -58,14 +58,19 @@ async function invokeTauri<T>(cmd: string, args?: Record<string, any>): Promise<
         driverName: 'AetherCam Virtual Camera',
       } as unknown as T;
     case 'get_pairing_qr_data':
+      // Try to fetch real IP/PIN from the running desktop server
+      try {
+        const resp = await fetch('http://127.0.0.1:48202/api/qr-data');
+        if (resp.ok) return (await resp.json()) as unknown as T;
+      } catch { /* server not running — fall through to mock */ }
       return {
         v: 2,
-        ip: '192.168.1.108',
+        ip: '192.168.1.1',
         udpPort: 48200,
         tcpPort: 48201,
         pin: '849201',
         serverPubKey: 'BM7v9LqP3rM1z0NvQ8sYt4XuKgH2jR5wFpE6aN8=',
-        hostname: 'Studio-Workstation',
+        hostname: 'AetherCam-PC',
       } as unknown as T;
     case 'get_paired_devices':
       return [
