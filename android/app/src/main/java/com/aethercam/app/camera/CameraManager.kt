@@ -2,7 +2,6 @@ package com.aethercam.app.camera
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.graphics.Rect
 import android.hardware.camera2.*
 import android.os.Build
 import android.os.Handler
@@ -41,13 +40,18 @@ class AetherCameraManager(
 
     private fun detectCameraSensors() {
         try {
+            var firstBackId: String? = null
+            var firstFrontId: String? = null
+
             for (id in cameraManager.cameraIdList) {
                 val chars = cameraManager.getCameraCharacteristics(id)
                 val facing = chars.get(CameraCharacteristics.LENS_FACING)
 
                 if (facing == CameraCharacteristics.LENS_FACING_FRONT) {
+                    if (firstFrontId == null) firstFrontId = id
                     availableCameraLenses[LensType.FRONT] = id
                 } else if (facing == CameraCharacteristics.LENS_FACING_BACK) {
+                    if (firstBackId == null) firstBackId = id
                     val focalLengths = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
                     val focalLength = focalLengths?.firstOrNull() ?: 4.0f
 
@@ -60,6 +64,14 @@ class AetherCameraManager(
                     }
                 }
             }
+
+            // Fallback safety: ensure WIDE is mapped to primary back camera
+            if (availableCameraLenses[LensType.WIDE] == null && firstBackId != null) {
+                availableCameraLenses[LensType.WIDE] = firstBackId
+            }
+            if (availableCameraLenses[LensType.FRONT] == null && firstFrontId != null) {
+                availableCameraLenses[LensType.FRONT] = firstFrontId
+            }
             Log.i(TAG, "Detected Physical Camera Lenses: $availableCameraLenses")
         } catch (e: Exception) {
             Log.e(TAG, "Error discovering camera hardware capabilities", e)
@@ -67,19 +79,21 @@ class AetherCameraManager(
     }
 
     fun startBackgroundThread() {
-        backgroundThread = HandlerThread("AetherCamBackground").apply {
-            start()
-            backgroundHandler = Handler(looper)
+        if (backgroundThread == null) {
+            backgroundThread = HandlerThread("AetherCamBackground").apply {
+                start()
+                backgroundHandler = Handler(looper)
+            }
         }
     }
 
     fun stopBackgroundThread() {
-        backgroundThread?.quitSafely()
         try {
-            backgroundThread?.join()
+            backgroundThread?.quitSafely()
+            backgroundThread?.join(500)
             backgroundThread = null
             backgroundHandler = null
-        } catch (e: InterruptedException) {
+        } catch (e: Exception) {
             Log.e(TAG, "Error stopping background thread", e)
         }
     }
@@ -90,43 +104,52 @@ class AetherCameraManager(
         previewSurface = surface
         startBackgroundThread()
 
-        val targetId = availableCameraLenses[config.lens] ?: "0"
+        val targetId = availableCameraLenses[config.lens]
+            ?: availableCameraLenses[LensType.WIDE]
+            ?: cameraManager.cameraIdList.firstOrNull()
+            ?: "0"
         activeCameraId = targetId
 
-        // Initialize low-latency encoder
-        videoEncoder = VideoEncoder(
-            width = config.resolution.width,
-            height = config.resolution.height,
-            fps = config.targetFps,
-            bitrateBps = config.bitrateBps,
-            codecType = config.codec,
-            onEncodedFrame = onFrameEncoded
-        )
-        videoEncoder?.start()
+        // Initialize low-latency encoder for network streaming (non-blocking if encoder fails)
+        try {
+            videoEncoder?.stop()
+            videoEncoder = VideoEncoder(
+                width = config.resolution.width,
+                height = config.resolution.height,
+                fps = config.targetFps,
+                bitrateBps = config.bitrateBps,
+                codecType = config.codec,
+                onEncodedFrame = onFrameEncoded
+            )
+            videoEncoder?.start()
+        } catch (e: Exception) {
+            Log.e(TAG, "VideoEncoder initialization warning, proceeding with UI preview: ${e.message}")
+        }
 
-        val encoderSurface = videoEncoder?.inputSurface ?: return
+        val encoderSurface = videoEncoder?.inputSurface
 
         try {
             if (!cameraOpenCloseLock.tryAcquire(2500, TimeUnit.MILLISECONDS)) {
-                throw RuntimeException("Time out waiting to lock camera opening.")
+                Log.w(TAG, "Camera open lock timeout, resetting lock")
+                try { cameraOpenCloseLock.release() } catch (e: Exception) {}
             }
 
             cameraManager.openCamera(targetId, object : CameraDevice.StateCallback() {
                 override fun onOpened(camera: CameraDevice) {
-                    cameraOpenCloseLock.release()
+                    try { cameraOpenCloseLock.release() } catch (e: Exception) {}
                     cameraDevice = camera
                     createCaptureSession(camera, encoderSurface, previewSurface)
                 }
 
                 override fun onDisconnected(camera: CameraDevice) {
-                    cameraOpenCloseLock.release()
-                    camera.close()
+                    try { cameraOpenCloseLock.release() } catch (e: Exception) {}
+                    try { camera.close() } catch (e: Exception) {}
                     cameraDevice = null
                 }
 
                 override fun onError(camera: CameraDevice, error: Int) {
-                    cameraOpenCloseLock.release()
-                    camera.close()
+                    try { cameraOpenCloseLock.release() } catch (e: Exception) {}
+                    try { camera.close() } catch (e: Exception) {}
                     cameraDevice = null
                     Log.e(TAG, "Camera open error code: $error")
                 }
@@ -139,12 +162,22 @@ class AetherCameraManager(
 
     private fun createCaptureSession(
         camera: CameraDevice,
-        encoderSurface: Surface,
+        encoderSurface: Surface?,
         uiPreviewSurface: Surface?
     ) {
         try {
-            val targets = mutableListOf(encoderSurface)
-            uiPreviewSurface?.let { targets.add(it) }
+            val targets = mutableListOf<Surface>()
+            if (encoderSurface != null && encoderSurface.isValid) {
+                targets.add(encoderSurface)
+            }
+            if (uiPreviewSurface != null && uiPreviewSurface.isValid) {
+                targets.add(uiPreviewSurface)
+            }
+
+            if (targets.isEmpty()) {
+                Log.w(TAG, "No valid surfaces to configure camera capture session")
+                return
+            }
 
             camera.createCaptureSession(targets, object : CameraCaptureSession.StateCallback() {
                 override fun onConfigured(session: CameraCaptureSession) {
@@ -178,19 +211,30 @@ class AetherCameraManager(
     private fun applyCaptureRequestSettings() {
         val session = captureSession ?: return
         val camera = cameraDevice ?: return
-        val encoderSurface = videoEncoder?.inputSurface ?: return
+        val encoderSurface = videoEncoder?.inputSurface
 
         try {
             val requestBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
-                addTarget(encoderSurface)
-                previewSurface?.let { addTarget(it) }
+                if (encoderSurface != null && encoderSurface.isValid) {
+                    addTarget(encoderSurface)
+                }
+                if (previewSurface != null && previewSurface!!.isValid) {
+                    addTarget(previewSurface!!)
+                }
 
                 // Optical Zoom or Sensor Crop
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    set(CaptureRequest.CONTROL_ZOOM_RATIO, currentConfig.zoomRatio)
+                    try {
+                        set(CaptureRequest.CONTROL_ZOOM_RATIO, currentConfig.zoomRatio)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Zoom ratio not supported: ${e.message}")
+                    }
                 }
 
-                // Exposure & ISO
+                // Exposure & Auto modes
+                set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
+
                 if (currentConfig.iso > 0 && currentConfig.exposureTimeNs > 0) {
                     set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
                     set(CaptureRequest.SENSOR_SENSITIVITY, currentConfig.iso)
@@ -206,14 +250,6 @@ class AetherCameraManager(
                     set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
                 }
 
-                // Focus
-                if (currentConfig.manualFocusDistance >= 0) {
-                    set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
-                    set(CaptureRequest.LENS_FOCUS_DISTANCE, currentConfig.manualFocusDistance)
-                } else {
-                    set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
-                }
-
                 // Flashlight / Torch
                 set(
                     CaptureRequest.FLASH_MODE,
@@ -222,14 +258,17 @@ class AetherCameraManager(
 
                 // Stabilization
                 if (currentConfig.stabilization) {
-                    set(
-                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
-                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
-                    )
+                    try {
+                        set(
+                            CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
+                            CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
+                        )
+                    } catch (e: Exception) {}
                 }
             }
 
             session.setRepeatingRequest(requestBuilder.build(), null, backgroundHandler)
+            Log.i(TAG, "Camera repeating capture request started successfully.")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to apply capture request parameters", e)
         }
@@ -245,7 +284,7 @@ class AetherCameraManager(
 
     fun stopCapture() {
         try {
-            cameraOpenCloseLock.acquire()
+            cameraOpenCloseLock.tryAcquire(1000, TimeUnit.MILLISECONDS)
             captureSession?.close()
             captureSession = null
             cameraDevice?.close()
@@ -255,7 +294,7 @@ class AetherCameraManager(
         } catch (e: Exception) {
             Log.e(TAG, "Error closing camera capture", e)
         } finally {
-            cameraOpenCloseLock.release()
+            try { cameraOpenCloseLock.release() } catch (e: Exception) {}
             stopBackgroundThread()
         }
     }

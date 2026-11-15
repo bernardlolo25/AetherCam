@@ -141,6 +141,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun pauseCameraForQrScan() {
+        cameraManager?.stopCapture()
+    }
+
+    fun resumeCameraAfterQrScan(previewSurface: Surface?) {
+        cameraManager?.startCapture(_cameraConfig.value, previewSurface)
+    }
+
     override fun onCleared() {
         stopStreaming()
         super.onCleared()

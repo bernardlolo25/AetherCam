@@ -38,14 +38,23 @@ class VideoEncoder(
                 setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
                 
                 // Low-latency configuration
-                setInteger(MediaFormat.KEY_PRIORITY, 0) // Real-time priority
+                try {
+                    setInteger(MediaFormat.KEY_PRIORITY, 0)
+                } catch (e: Exception) {}
+
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-                    setInteger(MediaFormat.KEY_LATENCY, 0) // Low latency
+                    try {
+                        setInteger(MediaFormat.KEY_LATENCY, 0)
+                    } catch (e: Exception) {}
                 }
 
                 if (codecType == VideoCodec.H264) {
-                    setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh)
-                    setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel51)
+                    try {
+                        setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh)
+                        setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.AVCLevel51)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "High profile / level 5.1 not supported on this device's encoder")
+                    }
                 }
             }
 

@@ -3,6 +3,7 @@ package com.aethercam.app.ui
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.WindowManager
@@ -26,6 +27,7 @@ import com.aethercam.app.ui.viewmodel.MainViewModel
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
+    private var currentSurface: Surface? = null
 
     private val requiredPermissions = arrayOf(
         Manifest.permission.CAMERA,
@@ -37,7 +39,12 @@ class MainActivity : ComponentActivity() {
     ) { permissions ->
         val allGranted = permissions.entries.all { it.value }
         if (allGranted) {
-            // Permissions granted
+            // User granted permissions! Start streaming immediately if surface is ready
+            currentSurface?.let { surface ->
+                if (surface.isValid) {
+                    viewModel.startStreaming(surface)
+                }
+            }
         }
     }
 
@@ -49,8 +56,47 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             AetherCamTheme {
-                MainScreen(viewModel)
+                MainScreen(
+                    viewModel = viewModel,
+                    onSurfaceAvailable = { surface ->
+                        currentSurface = surface
+                        if (hasAllPermissions() && surface.isValid) {
+                            viewModel.startStreaming(surface)
+                        }
+                    },
+                    onSurfaceDestroyed = {
+                        currentSurface = null
+                        viewModel.stopStreaming()
+                    },
+                    onOpenScanner = {
+                        viewModel.pauseCameraForQrScan()
+                    },
+                    onScannerClosed = {
+                        currentSurface?.let { surface ->
+                            if (surface.isValid && hasAllPermissions()) {
+                                viewModel.resumeCameraAfterQrScan(surface)
+                            }
+                        }
+                    }
+                )
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (hasAllPermissions()) {
+            currentSurface?.let { surface ->
+                if (surface.isValid && !viewModel.isStreaming.value) {
+                    viewModel.startStreaming(surface)
+                }
+            }
+        }
+    }
+
+    private fun hasAllPermissions(): Boolean {
+        return requiredPermissions.all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
         }
     }
 
@@ -65,7 +111,13 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MainScreen(viewModel: MainViewModel) {
+fun MainScreen(
+    viewModel: MainViewModel,
+    onSurfaceAvailable: (Surface) -> Unit,
+    onSurfaceDestroyed: () -> Unit,
+    onOpenScanner: () -> Unit,
+    onScannerClosed: () -> Unit
+) {
     val isStreaming by viewModel.isStreaming.collectAsState()
     val activeTransport by viewModel.activeTransport.collectAsState()
     val cameraConfig by viewModel.cameraConfig.collectAsState()
@@ -87,13 +139,13 @@ fun MainScreen(viewModel: MainViewModel) {
                 SurfaceView(context).apply {
                     holder.addCallback(object : SurfaceHolder.Callback {
                         override fun surfaceCreated(holder: SurfaceHolder) {
-                            viewModel.startStreaming(holder.surface)
+                            onSurfaceAvailable(holder.surface)
                         }
 
                         override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
 
                         override fun surfaceDestroyed(holder: SurfaceHolder) {
-                            viewModel.stopStreaming()
+                            onSurfaceDestroyed()
                         }
                     })
                 }
@@ -135,15 +187,22 @@ fun MainScreen(viewModel: MainViewModel) {
         // QR Scanner / Manual Pairing Dialog
         if (showPairingDialog) {
             QrScannerDialog(
-                onDismiss = { showPairingDialog = false },
+                onDismiss = {
+                    showPairingDialog = false
+                    onScannerClosed()
+                },
                 onQrScanned = { rawJson ->
                     viewModel.handleQrScanned(rawJson)
                     showPairingDialog = false
+                    onScannerClosed()
                 },
                 onManualPinSubmit = { ip, pin ->
                     viewModel.handleManualPairing(ip, pin)
                     showPairingDialog = false
-                }
+                    onScannerClosed()
+                },
+                onOpenScanner = onOpenScanner,
+                onScannerClosed = onScannerClosed
             )
         }
     }
