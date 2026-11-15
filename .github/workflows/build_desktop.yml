@@ -13,6 +13,7 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+  workflow_call:
 
 env:
   DOTNET_VERSION: '10.0.x'
@@ -310,35 +311,8 @@ jobs:
         shell: pwsh
         run: |
           Copy-Item "installer/driver_install_helper.ps1" "portable/" -Force
-          # Create a simple run.bat
-          @"
-@echo off
-echo AetherCam Portable - Starting...
-echo.
-echo NOTE: For virtual camera/microphone to work in Zoom/OBS/Teams,
-echo       run install_drivers.bat as Administrator first.
-echo.
-start AetherCam.exe
-"@ | Out-File -FilePath "portable/run.bat" -Encoding ASCII
-
-          @"
-@echo off
-:: Run as Administrator to register virtual devices
-net session >nul 2>&1
-if %errorLevel% neq 0 (
-    echo Requesting Administrator privileges...
-    powershell -Command "Start-Process '%~f0' -Verb RunAs"
-    exit /b
-)
-echo Registering AetherCam Virtual Camera...
-regsvr32 /s "drivers\driver\virtual_camera\build64\Release\AetherCamVirtualCam.dll"
-echo Registering AetherCam Virtual Microphone...
-regsvr32 /s "drivers\driver\virtual_mic\build64\Release\AetherCamVirtualMic.dll"
-netsh advfirewall firewall add rule name="AetherCam UDP Stream" dir=in action=allow protocol=UDP localport=48200 profile=private,domain
-netsh advfirewall firewall add rule name="AetherCam TCP Control" dir=in action=allow protocol=TCP localport=48201 profile=private,domain
-echo Done! You can now use AetherCam Virtual Camera in Zoom, OBS, Teams, etc.
-pause
-"@ | Out-File -FilePath "portable/install_drivers.bat" -Encoding ASCII
+          Copy-Item "installer/run_portable.bat" "portable/run.bat" -Force
+          Copy-Item "installer/install_drivers.bat" "portable/install_drivers.bat" -Force
 
       - name: Create portable ZIP
         shell: pwsh

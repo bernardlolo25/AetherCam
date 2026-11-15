@@ -121,7 +121,11 @@ class CameraStreamingService : Service() {
                 audioStreamer = AudioStreamer(
                     sampleRate    = 48_000,
                     channelConfig = android.media.AudioFormat.CHANNEL_IN_STEREO,
-                    onPacket      = { packet -> udpClient?.sendAudio(packet) }
+                    onPacket      = { packet ->
+                        serviceScope.launch {
+                            udpClient?.sendAudio(packet)
+                        }
+                    }
                 ).also { it.start() }
 
                 // Note: VideoEncoder is started from MainActivity via CameraManager

@@ -92,11 +92,6 @@
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
 
-        <!-- ── mDNS Discovery Foreground Service ─────────────────────── -->
-        <service
-            android:name=".network.DiscoveryService"
-            android:exported="false" />
-
     </application>
 
 </manifest>

@@ -11,47 +11,44 @@ import kotlinx.coroutines.*
  * AudioStreamer
  *
  * Records PCM audio from the microphone and delivers 20 ms frames to the
- * supplied callback.  Supports three usage patterns:
+ * supplied callback.
  *
+ * Supports three usage patterns:
  *  1. ViewModel usage (lambda-only constructor):
  *       AudioStreamer { pcmData, timestampUs -> ... }
  *
- *  2. Full config usage:
- *       AudioStreamer(sampleRate = 48_000, isStereo = true) { pcmData, timestampUs -> ... }
+ *  2. Config usage:
+ *       AudioStreamer(sampleRate = 48_000, channelConfig = AudioFormat.CHANNEL_IN_STEREO) { pcmData, timestampUs -> ... }
  *
- *  3. CameraStreamingService usage (channel config + single-arg callback):
+ *  3. CameraStreamingService usage (single-arg packet callback):
  *       AudioStreamer(sampleRate, channelConfig, onPacket = { bytes -> ... })
  */
 class AudioStreamer(
-    private val sampleRate: Int    = 48_000,
+    private val sampleRate: Int = 48_000,
     private val channelConfig: Int = AudioFormat.CHANNEL_IN_STEREO,
     private val onChunk: (pcm: ByteArray, timestampUs: Long) -> Unit
 ) {
     companion object {
         private const val TAG = "AudioStreamer"
-
-        /** Convenience: isStereo flag instead of raw channelConfig constant. */
-        operator fun invoke(
-            sampleRate: Int = 48_000,
-            isStereo: Boolean = true,
-            onAudioChunkReady: (pcmData: ByteArray, timestampUs: Long) -> Unit
-        ): AudioStreamer = AudioStreamer(
-            sampleRate    = sampleRate,
-            channelConfig = if (isStereo) AudioFormat.CHANNEL_IN_STEREO else AudioFormat.CHANNEL_IN_MONO,
-            onChunk       = onAudioChunkReady
-        )
-
-        /** CameraStreamingService convenience – single-arg packet callback. */
-        operator fun invoke(
-            sampleRate: Int,
-            channelConfig: Int,
-            onPacket: (ByteArray) -> Unit
-        ): AudioStreamer = AudioStreamer(
-            sampleRate    = sampleRate,
-            channelConfig = channelConfig,
-            onChunk       = { pcm, _ -> onPacket(pcm) }
-        )
     }
+
+    /** Secondary constructor for MainViewModel trailing-lambda usage: AudioStreamer { pcm, ts -> ... } */
+    constructor(onChunk: (pcm: ByteArray, timestampUs: Long) -> Unit) : this(
+        48_000,
+        AudioFormat.CHANNEL_IN_STEREO,
+        onChunk
+    )
+
+    /** Secondary constructor for Service usage: AudioStreamer(sampleRate, channelConfig, onPacket = { ... }) */
+    constructor(
+        sampleRate: Int,
+        channelConfig: Int,
+        onPacket: (ByteArray) -> Unit
+    ) : this(
+        sampleRate,
+        channelConfig,
+        { pcm, _ -> onPacket(pcm) }
+    )
 
     // ── State ─────────────────────────────────────────────────────────────────
     private var audioRecord: AudioRecord? = null
