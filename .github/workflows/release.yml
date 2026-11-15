@@ -1,62 +1,83 @@
-name: Release AetherCam
+name: Release — Full Build (Android + Windows)
 
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*.*.*'   # Triggers on v2.1.0, v2.2.0, etc.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 2.1.0)'
+        required: true
+        default: '2.1.0'
 
 jobs:
-  create-release:
-    runs-on: windows-latest
+  # Trigger both platform builds in parallel
+  trigger-android:
+    name: Trigger Android Build
+    uses: ./.github/workflows/build_android.yml
+
+  trigger-windows:
+    name: Trigger Windows Build
+    uses: ./.github/workflows/build_desktop.yml
+
+  # Collect and publish the release
+  publish-release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: [ trigger-android, trigger-windows ]
     permissions:
       contents: write
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js 20
-        uses: actions/setup-node@v4
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
         with:
-          node-version: 20
+          path: release-artifacts/
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
+      - name: List artifacts
+        run: find release-artifacts/ -type f | sort
 
-      - name: Set up MSVC
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Build Drivers
-        run: |
-          cd driver/virtual_camera
-          cmake -B build -A x64
-          cmake --build build --config Release
-          cd ../virtual_mic
-          cmake -B build -A x64
-          cmake --build build --config Release
-
-      - name: Build Desktop Frontend & Tauri Binary
-        run: |
-          cd desktop
-          npm ci
-          npm run build
-          cd src-tauri
-          cargo build --release
-
-      - name: Build NSIS Installer
-        run: |
-          choco install nsis -y
-          makensis installer/AetherCam_Installer.nsi
-
-      - name: Create GitHub Release
+      - name: Create unified GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            AetherCam_Setup_v2.1.0_x64.exe
-            driver/virtual_camera/build/Release/AetherCamVirtualCam.dll
-            driver/virtual_mic/build/Release/AetherCamVirtualMic.dll
-          draft: false
-          prerelease: false
+          tag_name: ${{ github.ref_name || format('v{0}', github.event.inputs.version) }}
+          name: "AetherCam ${{ github.ref_name || format('v{0}', github.event.inputs.version) }}"
           generate_release_notes: true
+          files: |
+            release-artifacts/**/*.exe
+            release-artifacts/**/*.apk
+            release-artifacts/**/*.zip
+          body: |
+            # AetherCam ${{ github.ref_name }}
+
+            > **Free, open-source, watermark-free** — the DroidCam killer 🎥
+
+            ## Platform Downloads
+
+            | Platform | File | Notes |
+            |----------|------|-------|
+            | 🪟 Windows 10/11 | `AetherCam_Setup_*_x64.exe` | Full installer — includes virtual camera/mic drivers |
+            | 🪟 Windows (portable) | `AetherCam_Portable_*_x64.zip` | No install needed; run `install_drivers.bat` as Admin for virtual devices |
+            | 🤖 Android 10+ | `AetherCam-release.apk` | Sideload or use Google Drive |
+            | 🤖 Android (debug) | `AetherCam-debug.apk` | For testing |
+
+            ## Quick Start
+
+            1. **Windows**: Run `AetherCam_Setup_*_x64.exe` → installs app + virtual camera/mic automatically
+            2. **Android**: Enable "Install unknown apps" → install `AetherCam-release.apk`
+            3. Open AetherCam on Windows → scan QR code on the phone → streaming starts!
+
+            ## What's Included
+
+            - 📹 **Virtual webcam** ("AetherCam Virtual Camera") — works in Zoom, OBS, Teams, Google Meet, Discord, Webex
+            - 🎙 **Virtual microphone** ("AetherCam Virtual Microphone")
+            - 📡 **All connection modes**: USB, Wi-Fi, Wi-Fi Direct, Bluetooth, QR code, manual IP
+            - 🤖 **On-device AI**: background blur, face tracking, auto-framing, noise suppression
+            - 🎥 **4K / 1080p 60fps** streaming with HDR + low-light enhancement
+            - 🔒 **End-to-end encrypted** (X25519 + AES-256-GCM)
+            - 💯 **100% free, no watermarks, no subscriptions**
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

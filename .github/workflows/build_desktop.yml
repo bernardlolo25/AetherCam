@@ -1,54 +1,355 @@
-name: Build Windows Desktop
+name: Build Windows Installer
 
 on:
   push:
     branches: [ main, develop ]
     paths:
+      - 'desktop-standalone/**'
       - 'desktop/**'
-      - 'protocol/**'
+      - 'driver/**'
+      - 'installer/**'
+      - 'bin/**'
       - '.github/workflows/build_desktop.yml'
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  NODE_VERSION:   '20'
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
 
+  # ══════════════════════════════════════════════════════════════════════════
+  # Job 1: Build the React web UI
+  # ══════════════════════════════════════════════════════════════════════════
+  build-frontend:
+    name: Build React Frontend
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js 20
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: 'desktop/package-lock.json'
+          cache-dependency-path: desktop/package-lock.json
 
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: 'desktop/src-tauri'
-
-      - name: Install Frontend Dependencies
+      - name: Install dependencies
         working-directory: desktop
         run: npm ci
 
-      - name: Build Frontend with Vite
+      - name: Build Vite bundle
         working-directory: desktop
         run: npm run build
 
-      - name: Build Tauri Desktop Server
-        working-directory: desktop/src-tauri
-        run: cargo build --release
-
-      - name: Upload Windows Desktop Binary
+      - name: Upload frontend dist
         uses: actions/upload-artifact@v4
         with:
-          name: aethercam-desktop-x64
-          path: desktop/src-tauri/target/release/aethercam-desktop.exe
+          name: frontend-dist
+          path: desktop/dist/
+          retention-days: 1
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Job 2: Build the .NET standalone desktop server EXE
+  # ══════════════════════════════════════════════════════════════════════════
+  build-server:
+    name: Build .NET Desktop Server
+    runs-on: windows-latest
+    needs: build-frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Download frontend dist
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: desktop-standalone/wwwroot/dist
+
+      - name: Restore NuGet packages
+        working-directory: desktop-standalone
+        run: dotnet restore
+
+      - name: Publish self-contained Windows x64 EXE
+        working-directory: desktop-standalone
+        run: |
+          dotnet publish -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true `
+            -p:PublishTrimmed=false `
+            -o publish-out
+
+      - name: Rename output
+        run: |
+          $exe = Get-ChildItem "desktop-standalone\publish-out\*.exe" | Select-Object -First 1
+          Copy-Item $exe.FullName "desktop-standalone\publish-out\AetherCam.exe" -Force
+
+      - name: Upload server EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-exe
+          path: desktop-standalone/publish-out/AetherCam.exe
+          retention-days: 1
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Job 3: Build DirectShow virtual camera + microphone DLLs
+  # ══════════════════════════════════════════════════════════════════════════
+  build-drivers:
+    name: Build DirectShow Drivers
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Install CMake
+        uses: lukka/get-cmake@latest
+
+      # ── Virtual Camera (x64) ────────────────────────────────────────────
+      - name: Configure Virtual Camera (x64)
+        working-directory: driver/virtual_camera
+        run: cmake -B build64 -A x64 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build Virtual Camera (x64)
+        working-directory: driver/virtual_camera
+        run: cmake --build build64 --config Release
+
+      # ── Virtual Camera (x86 / 32-bit for 32-bit app compat) ────────────
+      - name: Configure Virtual Camera (x86)
+        working-directory: driver/virtual_camera
+        run: cmake -B build -A Win32 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build Virtual Camera (x86)
+        working-directory: driver/virtual_camera
+        run: cmake --build build --config Release
+
+      # ── Virtual Microphone (x64) ────────────────────────────────────────
+      - name: Configure Virtual Microphone (x64)
+        working-directory: driver/virtual_mic
+        run: cmake -B build64 -A x64 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build Virtual Microphone (x64)
+        working-directory: driver/virtual_mic
+        run: cmake --build build64 --config Release
+
+      # ── Virtual Microphone (x86) ────────────────────────────────────────
+      - name: Configure Virtual Microphone (x86)
+        working-directory: driver/virtual_mic
+        run: cmake -B build -A Win32 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build Virtual Microphone (x86)
+        working-directory: driver/virtual_mic
+        run: cmake --build build --config Release
+
+      - name: Upload driver DLLs
+        uses: actions/upload-artifact@v4
+        with:
+          name: driver-dlls
+          path: |
+            driver/virtual_camera/build64/Release/AetherCamVirtualCam.dll
+            driver/virtual_camera/build/Release/AetherCamVirtualCam.dll
+            driver/virtual_mic/build64/Release/AetherCamVirtualMic.dll
+            driver/virtual_mic/build/Release/AetherCamVirtualMic.dll
+          retention-days: 1
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Job 4: Package everything into a signed Inno Setup installer
+  # ══════════════════════════════════════════════════════════════════════════
+  build-installer:
+    name: Build Windows Installer (.exe)
+    runs-on: windows-latest
+    needs: [ build-server, build-drivers ]
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Collect build artifacts ──────────────────────────────────────────
+      - name: Download server EXE
+        uses: actions/download-artifact@v4
+        with:
+          name: server-exe
+          path: bin/
+
+      - name: Download driver DLLs
+        uses: actions/download-artifact@v4
+        with:
+          name: driver-dlls
+          path: driver-artifacts/
+
+      # ── Reconstruct expected driver paths ───────────────────────────────
+      - name: Arrange driver artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "driver/virtual_camera/build64/Release"
+          New-Item -ItemType Directory -Force -Path "driver/virtual_camera/build/Release"
+          New-Item -ItemType Directory -Force -Path "driver/virtual_mic/build64/Release"
+          New-Item -ItemType Directory -Force -Path "driver/virtual_mic/build/Release"
+
+          Copy-Item "driver-artifacts/driver/virtual_camera/build64/Release/AetherCamVirtualCam.dll" `
+                    "driver/virtual_camera/build64/Release/" -Force
+          Copy-Item "driver-artifacts/driver/virtual_camera/build/Release/AetherCamVirtualCam.dll" `
+                    "driver/virtual_camera/build/Release/" -Force
+          Copy-Item "driver-artifacts/driver/virtual_mic/build64/Release/AetherCamVirtualMic.dll" `
+                    "driver/virtual_mic/build64/Release/" -Force
+          Copy-Item "driver-artifacts/driver/virtual_mic/build/Release/AetherCamVirtualMic.dll" `
+                    "driver/virtual_mic/build/Release/" -Force
+
+      # ── Copy bundled frontend dist to bin/ ───────────────────────────────
+      - name: Download frontend dist (for bin/)
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: bin/dist/
+
+      # ── Download VC++ Redist for bundling ───────────────────────────────
+      - name: Download VC++ Redistributable
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "installer/redist"
+          $url = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+          Invoke-WebRequest -Uri $url -OutFile "installer/redist/vc_redist.x64.exe" -UseBasicParsing
+          Write-Host "VC++ Redist downloaded: $((Get-Item 'installer/redist/vc_redist.x64.exe').Length) bytes"
+
+      # ── Generate app icon ────────────────────────────────────────────────
+      - name: Generate app icon
+        shell: powershell
+        run: |
+          Set-Location installer
+          powershell -ExecutionPolicy Bypass -File Make-Icon.ps1
+
+      # ── Install Inno Setup 6 ─────────────────────────────────────────────
+      - name: Install Inno Setup
+        run: |
+          choco install innosetup --version=6.2.2 -y --no-progress
+        shell: cmd
+
+      # ── Compile installer ────────────────────────────────────────────────
+      - name: Compile Inno Setup installer
+        shell: cmd
+        run: |
+          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\AetherCam.iss
+          dir dist\
+
+      # ── Upload installer artifact ────────────────────────────────────────
+      - name: Upload Windows Installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: AetherCam-Windows-Installer
+          path: dist/AetherCam_Setup_*.exe
+          retention-days: 30
+
+      # ── Create GitHub Release on version tags ────────────────────────────
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/AetherCam_Setup_*.exe
+          generate_release_notes: true
+          name: "AetherCam ${{ github.ref_name }} — Windows + Android"
+          body: |
+            ## AetherCam ${{ github.ref_name }}
+
+            ### Downloads
+            | File | Platform | Description |
+            |------|----------|-------------|
+            | `AetherCam_Setup_*_x64.exe` | Windows 10/11 x64 | Full installer with virtual camera & mic drivers |
+            | `AetherCam-release.apk` | Android 10+ | Phone app (from Build Android APK workflow) |
+
+            ### What's included in the installer
+            - **AetherCam.exe** — Desktop server + React dashboard UI
+            - **AetherCamVirtualCam.dll** — DirectShow virtual webcam (appears as "AetherCam Virtual Camera")
+            - **AetherCamVirtualMic.dll** — DirectShow virtual microphone (appears as "AetherCam Virtual Microphone")
+            - Automatic Windows Defender Firewall rules (UDP 48200, TCP 48201)
+            - Start Menu + Desktop shortcuts
+            - Clean uninstaller
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Job 5: Portable ZIP (no install required) — bonus for power users
+  # ══════════════════════════════════════════════════════════════════════════
+  build-portable:
+    name: Build Portable ZIP
+    runs-on: windows-latest
+    needs: [ build-server, build-drivers ]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download server EXE
+        uses: actions/download-artifact@v4
+        with:
+          name: server-exe
+          path: portable/
+
+      - name: Download frontend dist
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: portable/dist/
+
+      - name: Download driver DLLs
+        uses: actions/download-artifact@v4
+        with:
+          name: driver-dlls
+          path: portable/drivers/
+
+      - name: Copy driver helper scripts
+        shell: pwsh
+        run: |
+          Copy-Item "installer/driver_install_helper.ps1" "portable/" -Force
+          # Create a simple run.bat
+          @"
+@echo off
+echo AetherCam Portable - Starting...
+echo.
+echo NOTE: For virtual camera/microphone to work in Zoom/OBS/Teams,
+echo       run install_drivers.bat as Administrator first.
+echo.
+start AetherCam.exe
+"@ | Out-File -FilePath "portable/run.bat" -Encoding ASCII
+
+          @"
+@echo off
+:: Run as Administrator to register virtual devices
+net session >nul 2>&1
+if %errorLevel% neq 0 (
+    echo Requesting Administrator privileges...
+    powershell -Command "Start-Process '%~f0' -Verb RunAs"
+    exit /b
+)
+echo Registering AetherCam Virtual Camera...
+regsvr32 /s "drivers\driver\virtual_camera\build64\Release\AetherCamVirtualCam.dll"
+echo Registering AetherCam Virtual Microphone...
+regsvr32 /s "drivers\driver\virtual_mic\build64\Release\AetherCamVirtualMic.dll"
+netsh advfirewall firewall add rule name="AetherCam UDP Stream" dir=in action=allow protocol=UDP localport=48200 profile=private,domain
+netsh advfirewall firewall add rule name="AetherCam TCP Control" dir=in action=allow protocol=TCP localport=48201 profile=private,domain
+echo Done! You can now use AetherCam Virtual Camera in Zoom, OBS, Teams, etc.
+pause
+"@ | Out-File -FilePath "portable/install_drivers.bat" -Encoding ASCII
+
+      - name: Create portable ZIP
+        shell: pwsh
+        run: |
+          Compress-Archive -Path portable/* `
+            -DestinationPath "dist/AetherCam_Portable_2.1.0_x64.zip" -Force
+          Write-Host "Portable ZIP size: $((Get-Item 'dist/AetherCam_Portable_2.1.0_x64.zip').Length / 1MB) MB"
+
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: AetherCam-Portable-ZIP
+          path: dist/AetherCam_Portable_*.zip
+          retention-days: 30
