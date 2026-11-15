@@ -1,0 +1,62 @@
+name: Release AetherCam
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  create-release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build Drivers
+        run: |
+          cd driver/virtual_camera
+          cmake -B build -A x64
+          cmake --build build --config Release
+          cd ../virtual_mic
+          cmake -B build -A x64
+          cmake --build build --config Release
+
+      - name: Build Desktop Frontend & Tauri Binary
+        run: |
+          cd desktop
+          npm ci
+          npm run build
+          cd src-tauri
+          cargo build --release
+
+      - name: Build NSIS Installer
+        run: |
+          choco install nsis -y
+          makensis installer/AetherCam_Installer.nsi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            AetherCam_Setup_v2.1.0_x64.exe
+            driver/virtual_camera/build/Release/AetherCamVirtualCam.dll
+            driver/virtual_mic/build/Release/AetherCamVirtualMic.dll
+          draft: false
+          prerelease: false
+          generate_release_notes: true

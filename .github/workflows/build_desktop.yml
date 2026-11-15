@@ -1,0 +1,54 @@
+name: Build Windows Desktop
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'desktop/**'
+      - 'protocol/**'
+      - '.github/workflows/build_desktop.yml'
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'desktop/package-lock.json'
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: 'desktop/src-tauri'
+
+      - name: Install Frontend Dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Build Frontend with Vite
+        working-directory: desktop
+        run: npm run build
+
+      - name: Build Tauri Desktop Server
+        working-directory: desktop/src-tauri
+        run: cargo build --release
+
+      - name: Upload Windows Desktop Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: aethercam-desktop-x64
+          path: desktop/src-tauri/target/release/aethercam-desktop.exe

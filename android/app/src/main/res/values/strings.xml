@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">AetherCam</string>
+    <string name="virtual_webcam_title">AetherCam Studio</string>
+    <string name="scan_qr">Scan Desktop QR</string>
+    <string name="connected_status">Ready to Stream</string>
+    <string name="switch_camera">Switch Lens</string>
+    <string name="settings">Settings</string>
+</resources>

@@ -1,0 +1,120 @@
+syntax = "proto3";
+
+package aethercam.protocol;
+
+option java_package = "com.aethercam.app.network.proto";
+option java_multiple_files = true;
+
+// Enumeration of supported camera lenses
+enum LensType {
+  LENS_UNSPECIFIED = 0;
+  LENS_WIDE = 1;          // Primary camera (1x)
+  LENS_ULTRA_WIDE = 2;    // Ultra-wide lens (0.5x - 0.6x)
+  LENS_TELEPHOTO = 3;     // Optical telephoto lens (3x - 10x)
+  LENS_FRONT = 4;         // Front-facing selfie camera
+}
+
+// Video Codec formats
+enum VideoCodec {
+  CODEC_UNSPECIFIED = 0;
+  CODEC_H264 = 1;
+  CODEC_H265_HEVC = 2;
+  CODEC_AV1 = 3;
+}
+
+// Audio Formats
+enum AudioFormat {
+  AUDIO_FORMAT_UNSPECIFIED = 0;
+  AUDIO_PCM_16BIT = 1;
+  AUDIO_OPUS = 2;
+}
+
+// Handshake Request from Device to Desktop
+message HandshakeRequest {
+  string device_id = 1;
+  string device_name = 2;
+  string client_public_key_base64 = 3;
+  uint32 protocol_version = 4;
+  repeated LensType supported_lenses = 5;
+  uint32 max_width = 6;
+  uint32 max_height = 7;
+  uint32 max_fps = 8;
+  float battery_level = 9;
+  float battery_temperature_celsius = 10;
+  string pin_code_hash = 11;
+}
+
+// Handshake Response from Desktop to Device
+message HandshakeResponse {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_ACCEPTED = 1;
+    STATUS_REJECTED_UNAUTHORIZED = 2;
+    STATUS_VERSION_MISMATCH = 3;
+  }
+  Status status = 1;
+  string server_public_key_base64 = 2;
+  string session_token = 3;
+  uint32 negotiated_width = 4;
+  uint32 negotiated_height = 5;
+  uint32 negotiated_fps = 6;
+  uint32 target_bitrate_bps = 7;
+  VideoCodec codec = 8;
+}
+
+// Live Camera Control Parameters
+message CameraControlRequest {
+  uint64 request_id = 1;
+  LensType switch_lens = 2;
+  float zoom_ratio = 3;                // 0.5 to 10.0
+  bool torch_enabled = 4;
+  
+  // Exposure Controls (0 = Auto)
+  int32 iso = 5;                       // 50 - 6400
+  int64 exposure_time_ns = 6;          // Shutter speed in nanoseconds
+  int32 exposure_compensation = 7;     // EV compensation steps
+  
+  // Focus Controls (-1.0 = Auto)
+  float manual_focus_distance = 8;     // 0.0 (infinity) to 10.0 (macro)
+  
+  // White Balance (0 = Auto)
+  int32 white_balance_kelvin = 9;      // 2000K to 10000K
+  
+  // Stabilization
+  bool optical_stabilization = 10;
+  bool hdr_enabled = 11;
+}
+
+// Telemetry & Diagnostic Statistics (Sent 5-10 times/sec)
+message StreamTelemetry {
+  uint64 timestamp_us = 1;
+  uint32 current_fps = 2;
+  uint32 current_bitrate_bps = 3;
+  float round_trip_time_ms = 4;
+  float jitter_ms = 5;
+  float packet_loss_percentage = 6;
+  float battery_level = 7;
+  float battery_temperature_celsius = 8;
+  uint32 dropped_frames = 9;
+  string active_transport = 10; // "USB", "WIFI_LAN", "WIFI_DIRECT", "BLUETOOTH"
+}
+
+// Real-Time AI Studio Configuration
+message AiStudioConfiguration {
+  enum BackgroundMode {
+    BG_NONE = 0;
+    BG_BLUR = 1;
+    BG_VIRTUAL_IMAGE = 2;
+    BG_GREEN_SCREEN = 3;
+  }
+  BackgroundMode background_mode = 1;
+  float blur_intensity = 2;            // 0.0 to 1.0
+  string virtual_background_uri = 3;
+  uint32 green_screen_chroma_color = 4;// Hex RGB
+  
+  bool face_tracking_enabled = 5;
+  bool eye_contact_correction = 6;
+  float face_beautification_intensity = 7; // 0.0 to 1.0
+  bool studio_lighting_boost = 8;
+  bool neural_audio_denoise = 9;
+}

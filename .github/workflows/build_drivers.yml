@@ -1,0 +1,45 @@
+name: Build Virtual Device Drivers
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'driver/**'
+      - '.github/workflows/build_drivers.yml'
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-dshow-drivers:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up MSVC & Windows SDK
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure CMake for Virtual Camera
+        working-directory: driver/virtual_camera
+        run: cmake -B build -A x64
+
+      - name: Build Virtual Camera Filter
+        working-directory: driver/virtual_camera
+        run: cmake --build build --config Release
+
+      - name: Configure CMake for Virtual Microphone
+        working-directory: driver/virtual_mic
+        run: cmake -B build -A x64
+
+      - name: Build Virtual Microphone Filter
+        working-directory: driver/virtual_mic
+        run: cmake --build build --config Release
+
+      - name: Upload Virtual Camera Driver
+        uses: actions/upload-artifact@v4
+        with:
+          name: aethercam-drivers
+          path: |
+            driver/virtual_camera/build/Release/AetherCamVirtualCam.dll
+            driver/virtual_mic/build/Release/AetherCamVirtualMic.dll
