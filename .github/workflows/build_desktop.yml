@@ -233,18 +233,23 @@ jobs:
           Set-Location installer
           powershell -ExecutionPolicy Bypass -File Make-Icon.ps1
 
-      # ── Install Inno Setup 6 ─────────────────────────────────────────────
-      - name: Install Inno Setup
-        run: |
-          choco install innosetup --version=6.2.2 -y --no-progress
-        shell: cmd
-
       # ── Compile installer ────────────────────────────────────────────────
       - name: Compile Inno Setup installer
-        shell: cmd
+        shell: pwsh
         run: |
-          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\AetherCam.iss
-          dir dist\
+          New-Item -ItemType Directory -Force -Path "dist"
+          $isccCmd = Get-Command "iscc.exe" -ErrorAction SilentlyContinue
+          if ($isccCmd) {
+            & $isccCmd.Source "installer\AetherCam.iss"
+          } elseif (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") {
+            & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer\AetherCam.iss"
+          } elseif (Test-Path "C:\Program Files\Inno Setup 6\ISCC.exe") {
+            & "C:\Program Files\Inno Setup 6\ISCC.exe" "installer\AetherCam.iss"
+          } else {
+            choco install innosetup -y --no-progress
+            & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer\AetherCam.iss"
+          }
+          Get-ChildItem dist\
 
       # ── Upload installer artifact ────────────────────────────────────────
       - name: Upload Windows Installer
@@ -324,6 +329,7 @@ jobs:
       - name: Create portable ZIP
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force -Path "dist"
           Compress-Archive -Path portable/* `
             -DestinationPath "dist/AetherCam_Portable_2.1.0_x64.zip" -Force
           Write-Host "Portable ZIP size: $((Get-Item 'dist/AetherCam_Portable_2.1.0_x64.zip').Length / 1MB) MB"
