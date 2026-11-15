@@ -58,7 +58,7 @@ DisableProgramGroupPage=yes
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"; Flags: checked
+Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"
 Name: "startupicon"; Description: "Launch AetherCam when Windows &starts"; GroupDescription: "Startup:"; Flags: unchecked
 
 [Files]
