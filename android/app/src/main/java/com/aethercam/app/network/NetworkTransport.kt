@@ -31,7 +31,7 @@ class NetworkTransport(
         private const val TAG = "NetworkTransport"
     }
 
-    private val udpClient = UdpStreamingClient()
+    private val udpClient = UdpStreamingClient("127.0.0.1", 48200)
     private val usbManager = UsbCommunicationManager()
     private val discoveryService = DiscoveryService(context)
 

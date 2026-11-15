@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Network Security Config
+  Allows cleartext HTTP only to localhost (for loopback ADB/USB connections).
+  All external traffic must use HTTPS / TLS.
+-->
+<network-security-config>
+    <!-- Allow cleartext traffic only on loopback for ADB/USB local transport -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">::1</domain>
+    </domain-config>
+
+    <!-- All other connections must use TLS -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

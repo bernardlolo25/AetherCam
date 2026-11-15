@@ -14,26 +14,105 @@ on:
 jobs:
   build-android:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed to upload release assets
 
     steps:
+      # ── 1. Checkout ────────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ── 2. Java ────────────────────────────────────────────────────────────
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
+          cache: 'gradle'
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
+      # ── 3. Gradle wrapper jar (not stored in git) ──────────────────────────
+      - name: Bootstrap Gradle wrapper JAR
+        working-directory: android
+        run: |
+          # Download the official gradle-wrapper.jar using the wrapper properties version
+          GRADLE_VERSION=$(grep distributionUrl gradle/wrapper/gradle-wrapper.properties \
+            | sed 's/.*gradle-\(.*\)-bin.zip/\1/')
+          echo "Bootstrapping Gradle $GRADLE_VERSION wrapper JAR"
+          curl -fsSL \
+            "https://raw.githubusercontent.com/gradle/gradle/v${GRADLE_VERSION}/gradle/wrapper/gradle-wrapper.jar" \
+            -o gradle/wrapper/gradle-wrapper.jar || \
+          # Fallback: use gradle binary to generate the wrapper
+          ( \
+            sudo apt-get install -y gradle -qq && \
+            gradle wrapper --gradle-version "$GRADLE_VERSION" \
+          )
+          chmod +x gradlew
 
+      # ── 4. Android SDK extras ──────────────────────────────────────────────
+      - name: Accept Android SDK licences
+        run: yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+      # ── 5. Cache Gradle home ───────────────────────────────────────────────
+      - name: Cache Gradle caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      # ── 6. Build DEBUG APK ─────────────────────────────────────────────────
       - name: Build Debug APK
         working-directory: android
-        run: gradle assembleDebug --stacktrace
+        run: ./gradlew assembleDebug --stacktrace --no-daemon
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2"
 
-      - name: Upload Android APK
+      # ── 7. Build RELEASE APK (self-signed with debug keystore) ─────────────
+      #      For a production release, replace with a real keystore via secrets.
+      - name: Build Release APK (debug-signed)
+        working-directory: android
+        run: ./gradlew assembleRelease --stacktrace --no-daemon
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.workers.max=2"
+
+      # ── 8. Rename artifacts ────────────────────────────────────────────────
+      - name: Rename APK artifacts
+        run: |
+          DEBUG_APK=$(find android/app/build/outputs/apk/debug -name "*.apk" | head -1)
+          RELEASE_APK=$(find android/app/build/outputs/apk/release -name "*.apk" | head -1)
+          echo "DEBUG_APK=$DEBUG_APK" >> $GITHUB_ENV
+          echo "RELEASE_APK=$RELEASE_APK" >> $GITHUB_ENV
+          cp "$DEBUG_APK"   android/app/build/outputs/apk/AetherCam-debug.apk     || true
+          cp "$RELEASE_APK" android/app/build/outputs/apk/AetherCam-release.apk   || true
+
+      # ── 9. Upload Debug APK artifact ───────────────────────────────────────
+      - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: AetherCam-debug-apk
           path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 30
+
+      # ── 10. Upload Release APK artifact ────────────────────────────────────
+      - name: Upload Release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AetherCam-release-apk
+          path: android/app/build/outputs/apk/release/*.apk
+          retention-days: 30
+
+      # ── 11. Create GitHub Release on version tags ──────────────────────────
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            android/app/build/outputs/apk/AetherCam-debug.apk
+            android/app/build/outputs/apk/AetherCam-release.apk
+          generate_release_notes: true
+          name: "AetherCam ${{ github.ref_name }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
