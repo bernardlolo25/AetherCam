@@ -216,6 +216,8 @@ namespace AetherCam.Desktop
                         string method = methodEl.GetString() ?? "";
                         if (method == "handshake")
                         {
+                            telemetry.State = "Connected";
+                            telemetry.ActiveTransport = "Wi-Fi LAN";
                             string resp = "{\"jsonrpc\":\"2.0\",\"result\":{\"status\":\"ACCEPTED\",\"protocolVersion\":\"2.1\",\"sessionToken\":\"aether_csharp_982a\"},\"id\":1}";
                             byte[] respBytes = Encoding.UTF8.GetBytes(resp);
                             byte[] respLen = BitConverter.GetBytes(IPAddress.HostToNetworkOrder(respBytes.Length));
@@ -223,9 +225,34 @@ namespace AetherCam.Desktop
                             await stream.WriteAsync(respBytes, 0, respBytes.Length);
                             Console.WriteLine("[+] Android Handshake successfully accepted.");
                         }
+                        else if (method == "telemetry")
+                        {
+                            if (doc.RootElement.TryGetProperty("params", out var p))
+                            {
+                                if (p.TryGetProperty("batteryLevel", out var b)) telemetry.BatteryLevel = (float)b.GetDouble();
+                                if (p.TryGetProperty("batteryTemp", out var bt)) telemetry.BatteryTempC = (float)bt.GetDouble();
+                                if (p.TryGetProperty("transport", out var t))
+                                {
+                                    string tStr = t.GetString() ?? "";
+                                    telemetry.ActiveTransport = tStr switch
+                                    {
+                                        "USB" => "USB",
+                                        "WIFI_DIRECT" => "Wi-Fi Direct",
+                                        "BLUETOOTH" => "Bluetooth",
+                                        _ => "Wi-Fi LAN"
+                                    };
+                                }
+                            }
+                        }
                     }
                 }
             }
+            // Client disconnected
+            telemetry.State = "Waiting for Phone";
+            telemetry.ActiveTransport = "Disconnected";
+            telemetry.Fps = 0;
+            telemetry.BitrateKbps = 0;
+            Console.WriteLine("[-] Client disconnected.");
         }
 
         static async Task RunHttpStudioServer()
@@ -272,7 +299,24 @@ namespace AetherCam.Desktop
                 if (path.StartsWith("api/"))
                 {
                     string json = "{}";
-                    if (path == "api/telemetry") json = JsonSerializer.Serialize(telemetry);
+                    if (path == "api/telemetry")
+                    {
+                        json = JsonSerializer.Serialize(new
+                        {
+                            state = telemetry.State,
+                            fps = telemetry.Fps,
+                            bitrate_kbps = telemetry.BitrateKbps,
+                            latency_ms = telemetry.LatencyMs,
+                            jitter_ms = telemetry.JitterMs,
+                            packet_loss_pct = telemetry.PacketLossPct,
+                            resolution = telemetry.Resolution,
+                            active_transport = telemetry.ActiveTransport,
+                            battery_level = telemetry.BatteryLevel,
+                            battery_temp_c = telemetry.BatteryTempC,
+                            cpu_usage_pct = telemetry.CpuUsagePct,
+                            memory_mb = telemetry.MemoryMb
+                        });
+                    }
                     else if (path == "api/camera-controls") json = JsonSerializer.Serialize(cameraControls);
                     else if (path == "api/ai-state") json = JsonSerializer.Serialize(aiState);
                     else if (path == "api/qr-data")
@@ -360,18 +404,18 @@ namespace AetherCam.Desktop
 
     public class TelemetryState
     {
-        public string State { get; set; } = "Streaming";
-        public int Fps { get; set; } = 60;
-        public int BitrateKbps { get; set; } = 12500;
-        public float LatencyMs { get; set; } = 18.2f;
-        public float JitterMs { get; set; } = 1.1f;
+        public string State { get; set; } = "Waiting for Phone";
+        public int Fps { get; set; } = 0;
+        public int BitrateKbps { get; set; } = 0;
+        public float LatencyMs { get; set; } = 0.0f;
+        public float JitterMs { get; set; } = 0.0f;
         public float PacketLossPct { get; set; } = 0.0f;
         public string Resolution { get; set; } = "1920x1080";
-        public string ActiveTransport { get; set; } = "USB";
-        public float BatteryLevel { get; set; } = 94.0f;
-        public float BatteryTempC { get; set; } = 30.5f;
-        public float CpuUsagePct { get; set; } = 4.2f;
-        public float MemoryMb { get; set; } = 112.0f;
+        public string ActiveTransport { get; set; } = "Disconnected";
+        public float BatteryLevel { get; set; } = 0.0f;
+        public float BatteryTempC { get; set; } = 0.0f;
+        public float CpuUsagePct { get; set; } = 0.0f;
+        public float MemoryMb { get; set; } = 0.0f;
     }
 
     public class CameraControls

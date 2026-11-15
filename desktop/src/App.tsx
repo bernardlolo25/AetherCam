@@ -164,8 +164,20 @@ export const App: React.FC = () => {
             </h1>
             <span className="text-slate-600 hidden sm:inline">|</span>
             <div className="hidden sm:flex items-center gap-2 text-xs text-slate-300">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span className="font-medium">Google Pixel 8 Pro</span>
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  telemetry.state === 'Streaming' || telemetry.state === 'Connected'
+                    ? 'bg-emerald-400 animate-pulse'
+                    : 'bg-amber-400'
+                }`}
+              ></span>
+              <span className="font-medium">
+                {telemetry.state === 'Streaming'
+                  ? 'Phone Streaming'
+                  : telemetry.state === 'Connected'
+                  ? 'Phone Connected'
+                  : 'Waiting for Camera'}
+              </span>
             </div>
           </div>
 
@@ -196,6 +208,7 @@ export const App: React.FC = () => {
                   telemetry={telemetry}
                   cameraControls={cameraControls}
                   onUpdateCamera={handleUpdateCamera}
+                  onOpenPairing={() => setIsPairingOpen(true)}
                 />
               </div>
               <div className="shrink-0">

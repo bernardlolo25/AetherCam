@@ -13,19 +13,23 @@ async function invokeTauri<T>(cmd: string, args?: Record<string, any>): Promise<
   // Graceful browser mock fallback
   switch (cmd) {
     case 'get_stream_telemetry':
+      try {
+        const resp = await fetch('http://127.0.0.1:48202/api/telemetry');
+        if (resp.ok) return (await resp.json()) as unknown as T;
+      } catch {}
       return {
-        state: 'Streaming',
-        fps: 60,
-        bitrate_kbps: 12450,
-        latency_ms: 18.2,
-        jitter_ms: 1.1,
-        packet_loss_pct: 0.0,
+        state: 'Waiting for Phone',
+        fps: 0,
+        bitrate_kbps: 0,
+        latency_ms: 0,
+        jitter_ms: 0,
+        packet_loss_pct: 0,
         resolution: '1920x1080',
-        active_transport: 'USB',
-        battery_level: 94.0,
-        battery_temp_c: 30.5,
-        cpu_usage_pct: 4.8,
-        memory_mb: 114.2,
+        active_transport: 'Disconnected',
+        battery_level: 0,
+        battery_temp_c: 0,
+        cpu_usage_pct: 0,
+        memory_mb: 0,
       } as unknown as T;
     case 'get_camera_controls':
       return {
@@ -90,18 +94,18 @@ async function invokeTauri<T>(cmd: string, args?: Record<string, any>): Promise<
 
 export function useStreamTelemetry() {
   const [telemetry, setTelemetry] = useState<StreamTelemetry>({
-    state: 'Streaming',
-    fps: 60,
-    bitrate_kbps: 12500,
-    latency_ms: 18.2,
-    jitter_ms: 1.2,
-    packet_loss_pct: 0.0,
+    state: 'Waiting for Phone' as any,
+    fps: 0,
+    bitrate_kbps: 0,
+    latency_ms: 0,
+    jitter_ms: 0,
+    packet_loss_pct: 0,
     resolution: '1920x1080',
-    active_transport: 'USB',
-    battery_level: 92.0,
-    battery_temp_c: 31.0,
-    cpu_usage_pct: 5.1,
-    memory_mb: 118.0,
+    active_transport: 'Disconnected' as any,
+    battery_level: 0,
+    battery_temp_c: 0,
+    cpu_usage_pct: 0,
+    memory_mb: 0,
   });
 
   useEffect(() => {

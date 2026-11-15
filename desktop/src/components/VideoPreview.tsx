@@ -12,6 +12,7 @@ import {
   Zap,
   Activity,
   Layers,
+  Smartphone,
 } from 'lucide-react';
 import type { StreamTelemetry, CameraControls } from '../types';
 import { formatBitrate, formatTransportBadge } from '../utils/formatters';
@@ -20,12 +21,14 @@ interface VideoPreviewProps {
   telemetry: StreamTelemetry;
   cameraControls: CameraControls;
   onUpdateCamera: (controls: Partial<CameraControls>) => void;
+  onOpenPairing?: () => void;
 }
 
 export const VideoPreview: React.FC<VideoPreviewProps> = ({
   telemetry,
   cameraControls,
   onUpdateCamera,
+  onOpenPairing,
 }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
@@ -138,18 +141,53 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
         </div>
       )}
 
+      {/* Standby / No Phone Connected Overlay */}
+      {telemetry.state !== 'Streaming' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-10 pointer-events-auto bg-black/50 backdrop-blur-sm">
+          <div className="p-4 rounded-3xl bg-indigo-600/15 border border-indigo-500/30 mb-4 shadow-xl shadow-indigo-600/10">
+            <Smartphone className="w-10 h-10 text-indigo-400 animate-pulse" />
+          </div>
+          <h2 className="text-base sm:text-lg font-bold text-white mb-1.5">
+            {telemetry.state === 'Connected' ? 'Phone Connected — Starting Stream…' : 'Android Camera Disconnected'}
+          </h2>
+          <p className="text-xs text-slate-400 max-w-sm mb-5 leading-relaxed">
+            {telemetry.state === 'Connected'
+              ? 'Handshake completed! Negotiating video stream…'
+              : 'Launch AetherCam on your phone and tap Scan QR or connect via USB cable for instant 4K 60FPS streaming.'}
+          </p>
+          {onOpenPairing && telemetry.state !== 'Connected' && (
+            <button
+              onClick={onOpenPairing}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/30 transition-all cursor-pointer"
+            >
+              <Smartphone className="w-4 h-4" />
+              <span>Show Pairing QR Code</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Top Floating HUD Badges */}
       <div className="absolute top-4 left-4 right-4 flex items-center justify-between pointer-events-none z-10">
         <div className="flex items-center gap-2">
-          {/* Live Status Pill */}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/80 backdrop-blur-md border border-slate-700/60 text-xs font-medium text-slate-200">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span>LIVE</span>
-            <span className="text-slate-500">|</span>
-            <span className="font-mono text-emerald-400">{telemetry.resolution}</span>
-            <span className="text-slate-500">@</span>
-            <span className="font-mono text-cyan-400">{telemetry.fps} FPS</span>
-          </div>
+          {/* Live / Standby Status Pill */}
+          {telemetry.state === 'Streaming' ? (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/80 backdrop-blur-md border border-slate-700/60 text-xs font-medium text-slate-200">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>LIVE</span>
+              <span className="text-slate-500">|</span>
+              <span className="font-mono text-emerald-400">{telemetry.resolution}</span>
+              <span className="text-slate-500">@</span>
+              <span className="font-mono text-cyan-400">{telemetry.fps} FPS</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/80 backdrop-blur-md border border-amber-500/40 text-xs font-medium text-slate-200">
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+              <span className="text-amber-300 font-semibold">{telemetry.state === 'Connected' ? 'CONNECTED' : 'STANDBY'}</span>
+              <span className="text-slate-500">|</span>
+              <span className="text-slate-400">{telemetry.state === 'Connected' ? 'Ready' : 'Waiting for Camera'}</span>
+            </div>
+          )}
 
           {/* Transport Badge */}
           <div
