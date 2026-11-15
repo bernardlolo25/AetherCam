@@ -60,13 +60,15 @@ data class AbspPacket(
 
 object FecHelper {
     /**
-     * Compute XOR parity packet across data packets in group.
+     * Compute XOR parity packet across data packets in group safely.
      */
     fun createParity(packets: List<ByteArray>): ByteArray {
-        val maxLen = packets.maxOfOrNull { it.size } ?: 0
+        val snapshot = synchronized(packets) { packets.toList() }
+        val maxLen = snapshot.maxOfOrNull { it.size } ?: 0
+        if (maxLen == 0) return ByteArray(0)
         val parity = ByteArray(maxLen)
 
-        for (pkt in packets) {
+        for (pkt in snapshot) {
             for (i in pkt.indices) {
                 parity[i] = (parity[i].toInt() xor pkt[i].toInt()).toByte()
             }

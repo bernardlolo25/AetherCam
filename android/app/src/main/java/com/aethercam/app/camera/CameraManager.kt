@@ -100,6 +100,16 @@ class AetherCameraManager(
 
     @SuppressLint("MissingPermission")
     fun startCapture(config: CameraCaptureConfig, surface: Surface?) {
+        if (cameraDevice != null && captureSession != null) {
+            Log.i(TAG, "Camera is already actively capturing; applying settings directly")
+            currentConfig = config
+            if (surface != null && surface.isValid) {
+                previewSurface = surface
+            }
+            applyCaptureRequestSettings()
+            return
+        }
+
         currentConfig = config
         previewSurface = surface
         startBackgroundThread()

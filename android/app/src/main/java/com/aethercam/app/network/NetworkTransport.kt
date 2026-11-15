@@ -214,20 +214,24 @@ class NetworkTransport(
 
     private fun startTelemetryReporter(scope: CoroutineScope) {
         telemetryJob = scope.launch(Dispatchers.IO) {
-            val bm = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+            val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
             while (isActive && controlSocket?.isConnected == true) {
-                val batteryPct = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY).toFloat()
+                try {
+                    val batteryPct = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)?.toFloat() ?: 100f
 
-                val telemetryObj = JSONObject().apply {
-                    put("jsonrpc", "2.0")
-                    put("method", "telemetry")
-                    put("params", JSONObject().apply {
-                        put("batteryLevel", batteryPct)
-                        put("batteryTemp", 30.5)
-                        put("transport", activeTransport.name)
-                    })
+                    val telemetryObj = JSONObject().apply {
+                        put("jsonrpc", "2.0")
+                        put("method", "telemetry")
+                        put("params", JSONObject().apply {
+                            put("batteryLevel", batteryPct)
+                            put("batteryTemp", 30.5)
+                            put("transport", activeTransport.name)
+                        })
+                    }
+                    sendControlMessage(telemetryObj.toString())
+                } catch (e: Exception) {
+                    Log.w(TAG, "Telemetry send exception suppressed: ${e.message}")
                 }
-                sendControlMessage(telemetryObj.toString())
                 delay(2000)
             }
         }
@@ -235,13 +239,16 @@ class NetworkTransport(
 
     private fun sendControlMessage(msg: String) {
         try {
+            val out = controlOut ?: return
             val bytes = msg.toByteArray(Charsets.UTF_8)
             val lenBytes = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putInt(bytes.size).array()
-            controlOut?.write(lenBytes)
-            controlOut?.write(bytes)
-            controlOut?.flush()
+            synchronized(out) {
+                out.write(lenBytes)
+                out.write(bytes)
+                out.flush()
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to send control message", e)
+            Log.w(TAG, "Failed to send control message: ${e.message}")
         }
     }
 

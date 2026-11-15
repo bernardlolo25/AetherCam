@@ -13,8 +13,7 @@ import java.util.concurrent.atomic.AtomicLong
  * UdpStreamingClient
  *
  * Sends ABSP-framed video/audio packets over UDP with inline XOR FEC.
- * Construction accepts host+port so CameraStreamingService can instantiate
- * it without calling a separate connect() with parameters.
+ * Completely hardened with mutex-protected FEC buffer and resilient socket exception handling.
  */
 class UdpStreamingClient(
     private val host: String = "192.168.1.100",
@@ -25,9 +24,11 @@ class UdpStreamingClient(
         private const val FEC_GROUP_SIZE = 8
     }
 
-    // ── Socket ───────────────────────────────────────────────────────────────
+    // ── Socket & Address ──────────────────────────────────────────────────────
     private var socket: DatagramSocket? = null
     private var destinationAddress: InetAddress? = null
+    private var targetHost: String = host
+    private var targetPort: Int = port
 
     // ── Stats counters ───────────────────────────────────────────────────────
     private val sequenceCounter  = AtomicInteger(0)
@@ -37,6 +38,7 @@ class UdpStreamingClient(
     private var bytesInWindow    = AtomicLong(0L)
 
     private val fecPacketBuffer  = mutableListOf<ByteArray>()
+    private val fecLock = Any()
 
     // ─────────────────────────────────────────────────────────────────────────
     // Connection
@@ -44,25 +46,20 @@ class UdpStreamingClient(
 
     /** Open the UDP socket toward host:port supplied at construction time. */
     fun connect() {
-        disconnect()
-        try {
-            socket = DatagramSocket()
-            destinationAddress = InetAddress.getByName(host)
-            Log.i(TAG, "UdpStreamingClient connected → $host:$port")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to open DatagramSocket", e)
-        }
+        connect(targetHost, targetPort)
     }
 
-    /** Legacy overload kept for callers that supply host+port explicitly. */
+    /** Connect toward explicitly specified host and port. */
     fun connect(h: String, p: Int) {
         disconnect()
         try {
+            targetHost = h.trim()
+            targetPort = p
             socket = DatagramSocket()
-            destinationAddress = InetAddress.getByName(h)
-            Log.i(TAG, "UdpStreamingClient connected → $h:$p (explicit)")
+            destinationAddress = InetAddress.getByName(targetHost)
+            Log.i(TAG, "UdpStreamingClient connected → $targetHost:$targetPort")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to open DatagramSocket", e)
+            Log.e(TAG, "Failed to open DatagramSocket to $h:$p", e)
         }
     }
 
@@ -81,44 +78,57 @@ class UdpStreamingClient(
         val sock = socket ?: return@withContext
         val addr = destinationAddress ?: return@withContext
 
-        val chunkSize      = AbspConstants.MAX_PAYLOAD_CHUNK
-        val totalFragments = ((payload.size + chunkSize - 1) / chunkSize).coerceAtLeast(1)
+        try {
+            val chunkSize      = AbspConstants.MAX_PAYLOAD_CHUNK
+            val totalFragments = ((payload.size + chunkSize - 1) / chunkSize).coerceAtLeast(1)
 
-        for (i in 0 until totalFragments) {
-            val offset = i * chunkSize
-            val length = (payload.size - offset).coerceAtMost(chunkSize)
-            val chunk  = payload.copyOfRange(offset, offset + length)
+            for (i in 0 until totalFragments) {
+                val offset = i * chunkSize
+                val length = (payload.size - offset).coerceAtMost(chunkSize)
+                val chunk  = payload.copyOfRange(offset, offset + length)
 
-            var flags = 0.toByte()
-            if (isKeyframe)         flags = (flags.toInt() or AbspConstants.FLAG_KEYFRAME.toInt()).toByte()
-            if (totalFragments > 1) flags = (flags.toInt() or AbspConstants.FLAG_FRAGMENTED.toInt()).toByte()
-            if (totalFragments > 1 && i == totalFragments - 1)
-                                    flags = (flags.toInt() or AbspConstants.FLAG_LAST_FRAGMENT.toInt()).toByte()
+                var flags = 0.toByte()
+                if (isKeyframe)         flags = (flags.toInt() or AbspConstants.FLAG_KEYFRAME.toInt()).toByte()
+                if (totalFragments > 1) flags = (flags.toInt() or AbspConstants.FLAG_FRAGMENTED.toInt()).toByte()
+                if (totalFragments > 1 && i == totalFragments - 1)
+                                        flags = (flags.toInt() or AbspConstants.FLAG_LAST_FRAGMENT.toInt()).toByte()
 
-            val seq = (sequenceCounter.getAndIncrement() and 0xFFFF).toShort()
-            val pkt = AbspPacket(
-                packetType     = packetType,
-                flags          = flags,
-                channel        = if (packetType == AbspConstants.PKT_TYPE_AUDIO) 1 else 0,
-                sequenceNumber = seq,
-                timestampUs    = (timestampUs and 0xFFFFFFFFL).toInt(),
-                fragmentIndex  = if (totalFragments > 1) i.toShort() else null,
-                totalFragments = if (totalFragments > 1) totalFragments.toShort() else null,
-                payload        = chunk
-            )
+                val seq = (sequenceCounter.getAndIncrement() and 0xFFFF).toShort()
+                val pkt = AbspPacket(
+                    packetType     = packetType,
+                    flags          = flags,
+                    channel        = if (packetType == AbspConstants.PKT_TYPE_AUDIO) 1 else 0,
+                    sequenceNumber = seq,
+                    timestampUs    = (timestampUs and 0xFFFFFFFFL).toInt(),
+                    fragmentIndex  = if (totalFragments > 1) i.toShort() else null,
+                    totalFragments = if (totalFragments > 1) totalFragments.toShort() else null,
+                    payload        = chunk
+                )
 
-            val serialized = pkt.serialize()
-            sock.send(DatagramPacket(serialized, serialized.size, addr, port))
+                val serialized = pkt.serialize()
 
-            bytesSentCounter.addAndGet(serialized.size.toLong())
-            bytesInWindow.addAndGet(serialized.size.toLong())
+                // Safe socket send: never throw or crash on transient network/firewall drops
+                try {
+                    sock.send(DatagramPacket(serialized, serialized.size, addr, targetPort))
+                } catch (e: Exception) {
+                    Log.w(TAG, "Socket send dropped frame fragment: ${e.message}")
+                    return@withContext
+                }
 
-            fecPacketBuffer.add(serialized)
-            if (fecPacketBuffer.size >= FEC_GROUP_SIZE) {
-                dispatchFecParity(sock, addr, timestampUs)
+                bytesSentCounter.addAndGet(serialized.size.toLong())
+                bytesInWindow.addAndGet(serialized.size.toLong())
+
+                synchronized(fecLock) {
+                    fecPacketBuffer.add(serialized)
+                    if (fecPacketBuffer.size >= FEC_GROUP_SIZE) {
+                        dispatchFecParity(sock, addr, timestampUs)
+                    }
+                }
             }
+            framesSentCounter.incrementAndGet()
+        } catch (e: Exception) {
+            Log.w(TAG, "sendMediaFrame suppressed error: ${e.message}")
         }
-        framesSentCounter.incrementAndGet()
     }
 
     /** Send a raw pre-encoded audio PCM/Opus packet. */
@@ -143,7 +153,6 @@ class UdpStreamingClient(
         statsWindowStart = now
 
         val bitrateKbps = ((bytes * 8L * 1000L) / elapsed / 1024L).toInt()
-        // FPS approximated from frames sent in window
         val fps = (framesSentCounter.get() * 1000f / elapsed).coerceAtMost(120f)
         return Stats(bitrateKbps, fps, framesSentCounter.get())
     }
@@ -167,9 +176,9 @@ class UdpStreamingClient(
         )
         val serialized = fecPkt.serialize()
         try {
-            sock.send(DatagramPacket(serialized, serialized.size, addr, port))
+            sock.send(DatagramPacket(serialized, serialized.size, addr, targetPort))
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to send FEC parity", e)
+            Log.w(TAG, "Failed to send FEC parity: ${e.message}")
         }
     }
 
@@ -177,6 +186,8 @@ class UdpStreamingClient(
         try { socket?.close() } catch (_: Exception) {}
         socket = null
         destinationAddress = null
-        fecPacketBuffer.clear()
+        synchronized(fecLock) {
+            fecPacketBuffer.clear()
+        }
     }
 }

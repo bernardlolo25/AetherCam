@@ -189,17 +189,14 @@ fun MainScreen(
             QrScannerDialog(
                 onDismiss = {
                     showPairingDialog = false
-                    onScannerClosed()
                 },
                 onQrScanned = { rawJson ->
                     viewModel.handleQrScanned(rawJson)
                     showPairingDialog = false
-                    onScannerClosed()
                 },
                 onManualPinSubmit = { ip, pin ->
                     viewModel.handleManualPairing(ip, pin)
                     showPairingDialog = false
-                    onScannerClosed()
                 },
                 onOpenScanner = onOpenScanner,
                 onScannerClosed = onScannerClosed
