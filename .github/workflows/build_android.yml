@@ -31,23 +31,10 @@ jobs:
           distribution: 'temurin'
           cache: 'gradle'
 
-      # ── 3. Gradle wrapper jar (not stored in git) ──────────────────────────
-      - name: Bootstrap Gradle wrapper JAR
+      # ── 3. Make Gradle wrapper executable ──────────────────────────────────
+      - name: Make Gradle wrapper executable
         working-directory: android
-        run: |
-          # Download the official gradle-wrapper.jar using the wrapper properties version
-          GRADLE_VERSION=$(grep distributionUrl gradle/wrapper/gradle-wrapper.properties \
-            | sed 's/.*gradle-\(.*\)-bin.zip/\1/')
-          echo "Bootstrapping Gradle $GRADLE_VERSION wrapper JAR"
-          curl -fsSL \
-            "https://raw.githubusercontent.com/gradle/gradle/v${GRADLE_VERSION}/gradle/wrapper/gradle-wrapper.jar" \
-            -o gradle/wrapper/gradle-wrapper.jar || \
-          # Fallback: use gradle binary to generate the wrapper
-          ( \
-            sudo apt-get install -y gradle -qq && \
-            gradle wrapper --gradle-version "$GRADLE_VERSION" \
-          )
-          chmod +x gradlew
+        run: chmod +x gradlew
 
       # ── 4. Android SDK extras ──────────────────────────────────────────────
       - name: Accept Android SDK licences

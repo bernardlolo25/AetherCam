@@ -89,10 +89,14 @@ jobs:
             -p:PublishTrimmed=false `
             -o publish-out
 
-      - name: Rename output
+      - name: Verify output EXE
         run: |
-          $exe = Get-ChildItem "desktop-standalone\publish-out\*.exe" | Select-Object -First 1
-          Copy-Item $exe.FullName "desktop-standalone\publish-out\AetherCam.exe" -Force
+          $exe = Get-ChildItem "desktop-standalone\publish-out\AetherCam.exe"
+          if (-not $exe) {
+            $any = Get-ChildItem "desktop-standalone\publish-out\*.exe" | Select-Object -First 1
+            Copy-Item $any.FullName "desktop-standalone\publish-out\AetherCam.exe" -Force
+          }
+          Write-Host "Server EXE built successfully: $((Get-Item 'desktop-standalone\publish-out\AetherCam.exe').Length / 1MB) MB"
 
       - name: Upload server EXE
         uses: actions/upload-artifact@v4
@@ -198,14 +202,13 @@ jobs:
           New-Item -ItemType Directory -Force -Path "driver/virtual_mic/build64/Release"
           New-Item -ItemType Directory -Force -Path "driver/virtual_mic/build/Release"
 
-          Copy-Item "driver-artifacts/driver/virtual_camera/build64/Release/AetherCamVirtualCam.dll" `
-                    "driver/virtual_camera/build64/Release/" -Force
-          Copy-Item "driver-artifacts/driver/virtual_camera/build/Release/AetherCamVirtualCam.dll" `
-                    "driver/virtual_camera/build/Release/" -Force
-          Copy-Item "driver-artifacts/driver/virtual_mic/build64/Release/AetherCamVirtualMic.dll" `
-                    "driver/virtual_mic/build64/Release/" -Force
-          Copy-Item "driver-artifacts/driver/virtual_mic/build/Release/AetherCamVirtualMic.dll" `
-                    "driver/virtual_mic/build/Release/" -Force
+          $camDll = (Get-ChildItem -Path "driver-artifacts" -Filter "AetherCamVirtualCam.dll" -Recurse | Select-Object -First 1).FullName
+          $micDll = (Get-ChildItem -Path "driver-artifacts" -Filter "AetherCamVirtualMic.dll" -Recurse | Select-Object -First 1).FullName
+
+          Copy-Item $camDll "driver/virtual_camera/build64/Release/AetherCamVirtualCam.dll" -Force
+          Copy-Item $camDll "driver/virtual_camera/build/Release/AetherCamVirtualCam.dll" -Force
+          Copy-Item $micDll "driver/virtual_mic/build64/Release/AetherCamVirtualMic.dll" -Force
+          Copy-Item $micDll "driver/virtual_mic/build/Release/AetherCamVirtualMic.dll" -Force
 
       # ── Copy bundled frontend dist to bin/ ───────────────────────────────
       - name: Download frontend dist (for bin/)
@@ -313,6 +316,10 @@ jobs:
           Copy-Item "installer/driver_install_helper.ps1" "portable/" -Force
           Copy-Item "installer/run_portable.bat" "portable/run.bat" -Force
           Copy-Item "installer/install_drivers.bat" "portable/install_drivers.bat" -Force
+          $camDll = (Get-ChildItem -Path "portable/drivers" -Filter "AetherCamVirtualCam.dll" -Recurse | Select-Object -First 1).FullName
+          $micDll = (Get-ChildItem -Path "portable/drivers" -Filter "AetherCamVirtualMic.dll" -Recurse | Select-Object -First 1).FullName
+          if ($camDll) { Copy-Item $camDll "portable/AetherCamVirtualCam.dll" -Force }
+          if ($micDll) { Copy-Item $micDll "portable/AetherCamVirtualMic.dll" -Force }
 
       - name: Create portable ZIP
         shell: pwsh

@@ -12,3 +12,10 @@
 
 # Keep Compose Runtime
 -keep class androidx.compose.** { *; }
+
+# Suppress warnings for missing annotations in third-party security libraries
+-dontwarn com.google.errorprone.annotations.**
+-dontwarn javax.annotation.**
+-dontwarn org.checkerframework.**
+-dontwarn com.google.crypto.tink.**
+-keep class com.google.crypto.tink.** { *; }
