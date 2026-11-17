@@ -106,8 +106,8 @@ class NetworkTransport(
             startTelemetryReporter(scope)
 
             Log.i(TAG, "NetworkTransport successfully connected via $transport to $host")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to establish TCP control plane to $host:$tcpPort", e)
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed to establish TCP control plane to $host:$tcpPort", t)
             activeTransport = ActiveTransportType.NONE
         }
     }

@@ -39,6 +39,7 @@ class UdpStreamingClient(
 
     private val fecPacketBuffer  = mutableListOf<ByteArray>()
     private val fecLock = Any()
+    private val sendLock = Any()
 
     // ─────────────────────────────────────────────────────────────────────────
     // Connection
@@ -107,11 +108,13 @@ class UdpStreamingClient(
 
                 val serialized = pkt.serialize()
 
-                // Safe socket send: never throw or crash on transient network/firewall drops
+                // Safe, synchronized socket send: never throw or crash on transient network/firewall drops
                 try {
-                    sock.send(DatagramPacket(serialized, serialized.size, addr, targetPort))
-                } catch (e: Exception) {
-                    Log.w(TAG, "Socket send dropped frame fragment: ${e.message}")
+                    synchronized(sendLock) {
+                        sock.send(DatagramPacket(serialized, serialized.size, addr, targetPort))
+                    }
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Socket send dropped frame fragment: ${t.message}")
                     return@withContext
                 }
 
@@ -126,8 +129,8 @@ class UdpStreamingClient(
                 }
             }
             framesSentCounter.incrementAndGet()
-        } catch (e: Exception) {
-            Log.w(TAG, "sendMediaFrame suppressed error: ${e.message}")
+        } catch (t: Throwable) {
+            Log.w(TAG, "sendMediaFrame suppressed error: ${t.message}")
         }
     }
 
@@ -176,9 +179,11 @@ class UdpStreamingClient(
         )
         val serialized = fecPkt.serialize()
         try {
-            sock.send(DatagramPacket(serialized, serialized.size, addr, targetPort))
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to send FEC parity: ${e.message}")
+            synchronized(sendLock) {
+                sock.send(DatagramPacket(serialized, serialized.size, addr, targetPort))
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to send FEC parity: ${t.message}")
         }
     }
 

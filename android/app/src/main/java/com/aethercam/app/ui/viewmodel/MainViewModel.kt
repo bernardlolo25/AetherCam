@@ -66,14 +66,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var cameraManager: AetherCameraManager? = null
     private var audioStreamer: AudioStreamer? = null
 
+    private val isSendingVideo = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val isSendingAudio = java.util.concurrent.atomic.AtomicBoolean(false)
+
     init {
         cameraManager = AetherCameraManager(application) { frameBytes, isKeyframe, timestampUs ->
             if (_isStreaming.value && _activeTransport.value != ActiveTransportType.NONE) {
-                viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
-                    try {
-                        networkTransport.sendVideoFrame(frameBytes, isKeyframe, timestampUs)
-                    } catch (e: Exception) {
-                        Log.w("MainViewModel", "Suppressed video frame exception: ${e.message}")
+                // Drop delta frames if network queue is busy to prevent coroutine heap accumulation and OOM
+                if (isKeyframe || isSendingVideo.compareAndSet(false, true)) {
+                    viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+                        try {
+                            networkTransport.sendVideoFrame(frameBytes, isKeyframe, timestampUs)
+                        } catch (t: Throwable) {
+                            Log.w("MainViewModel", "Suppressed video frame error: ${t.message}")
+                        } finally {
+                            isSendingVideo.set(false)
+                        }
                     }
                 }
             }
@@ -81,11 +89,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         audioStreamer = AudioStreamer { pcmData, timestampUs ->
             if (_isStreaming.value && !_isMuted.value && _activeTransport.value != ActiveTransportType.NONE) {
-                viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
-                    try {
-                        networkTransport.sendAudioFrame(pcmData, timestampUs)
-                    } catch (e: Exception) {
-                        Log.w("MainViewModel", "Suppressed audio frame exception: ${e.message}")
+                if (isSendingAudio.compareAndSet(false, true)) {
+                    viewModelScope.launch(Dispatchers.IO + exceptionHandler) {
+                        try {
+                            networkTransport.sendAudioFrame(pcmData, timestampUs)
+                        } catch (t: Throwable) {
+                            Log.w("MainViewModel", "Suppressed audio frame error: ${t.message}")
+                        } finally {
+                            isSendingAudio.set(false)
+                        }
                     }
                 }
             }
@@ -159,9 +171,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _connectionStatus.value = "❌ Connection failed — is AetherCam running on the PC? Same Wi-Fi?"
                 }
                 Log.i("MainViewModel", "Pairing established to ${info.hostIp}")
-            } catch (e: Exception) {
-                _connectionStatus.value = "❌ Error: ${e.message}"
-                Log.e("MainViewModel", "Pairing connection error: ${e.message}", e)
+            } catch (t: Throwable) {
+                _connectionStatus.value = "❌ Error: ${t.message}"
+                Log.e("MainViewModel", "Pairing connection error: ${t.message}", t)
             }
         }
     }
@@ -189,9 +201,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _connectionStatus.value = "❌ Cannot reach $targetIp:48201 — ensure AetherCam desktop is running and both devices are on the same Wi-Fi"
                 }
                 Log.i("MainViewModel", "Manual pairing connected to $targetIp")
-            } catch (e: Exception) {
-                _connectionStatus.value = "❌ Error: ${e.message}"
-                Log.e("MainViewModel", "Manual pairing error: ${e.message}", e)
+            } catch (t: Throwable) {
+                _connectionStatus.value = "❌ Error: ${t.message}"
+                Log.e("MainViewModel", "Manual pairing error: ${t.message}", t)
             }
         }
     }
