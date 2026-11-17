@@ -11,11 +11,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -195,21 +190,17 @@ fun MainScreen(
             modifier = Modifier.statusBarsPadding()
         )
 
-        // Floating Connection Status Banner (fade in/out overlay, never resizes SurfaceView)
-        AnimatedVisibility(
-            visible = connectionStatus != null,
-            enter = fadeIn() + slideInVertically(),
-            exit = fadeOut() + slideOutVertically(),
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 96.dp)
-                .padding(horizontal = 24.dp)
-        ) {
+        // Floating Connection Status Banner (overlay, never resizes SurfaceView)
+        if (connectionStatus != null) {
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = Color(0xFF1E293B),
                 border = BorderStroke(1.dp, Color(0xFF475569)),
-                shadowElevation = 8.dp
+                shadowElevation = 8.dp,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 96.dp)
+                    .padding(horizontal = 24.dp)
             ) {
                 Text(
                     text = connectionStatus ?: "",
